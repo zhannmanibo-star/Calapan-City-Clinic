@@ -29,22 +29,6 @@ class Auth extends Controller
         return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     }
 
-    // Reads and checks the optional patient profile fields
-    private function profile_input(array $in)
-    {
-        $birth = trim($in['birthdate'] ?? '');
-        $sex   = trim($in['sex'] ?? '');
-        $addr  = trim($in['address'] ?? '');
-        $phone = trim($in['contact_no'] ?? '');
-
-        if ($birth !== '' && (!$this->guard->valid_date($birth) || $birth > date('Y-m-d'))) $this->guard->fail('Birthdate must look like 2000-05-17 and cannot be in the future.', 422);
-        if ($sex !== '' && !in_array($sex, ['Male', 'Female', 'Other'], true)) $this->guard->fail('Sex must be Male, Female or Other.', 422);
-        if (mb_strlen($addr) > 255) $this->guard->fail('Address is too long (255 characters max).', 422);
-        if ($phone !== '' && !preg_match('/^[0-9+\-\s()]{7,20}$/', $phone)) $this->guard->fail('Contact number is not valid.', 422);
-
-        return ['birthdate' => $birth ?: null, 'sex' => $sex ?: null, 'address' => $addr ?: null, 'contact_no' => $phone ?: null];
-    }
-
     // POST /api/auth/register  -> new patient account
     // { name, email, password, birthdate?, sex?, address?, contact_no? }
     public function register()
@@ -52,15 +36,11 @@ class Auth extends Controller
         $this->guard->api()->require_method('POST');
         $this->guard->api()->rate_limit('register_' . $this->ip(), 10, 60);
 
-        $in    = $this->guard->body();
-        $name  = trim($in['name'] ?? '');
-        $email = strtolower(trim($in['email'] ?? ''));
-        $pass  = (string) ($in['password'] ?? '');
-
-        if (mb_strlen($name) < 2 || mb_strlen($name) > 100) $this->guard->fail('Name must be 2 to 100 characters.', 422);
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100) $this->guard->fail('Please enter a valid email address.', 422);
-        if (mb_strlen($pass) < 8) $this->guard->fail('Password must be at least 8 characters.', 422);
-        $profile = $this->profile_input($in);
+        $in      = $this->guard->body();
+        $name    = $this->guard->name_field($in);
+        $email   = $this->guard->email_field($in);
+        $pass    = $this->guard->password_field($in);
+        $profile = $this->guard->patient_profile($in);
 
         if ($this->User_model->find_by_email($email)) $this->guard->fail('That email is already registered.', 409);
 
@@ -181,14 +161,13 @@ class Auth extends Controller
 
         $patient = $this->Patient_model->find_by_user($payload['sub']);
         $in = $this->guard->body();
-        $name = trim($in['name'] ?? $patient['name']);
-        if (mb_strlen($name) < 2 || mb_strlen($name) > 100) $this->guard->fail('Name must be 2 to 100 characters.', 422);
+        $name = $this->guard->name_field($in, $patient['name']);
 
         $merged = array_merge([
             'birthdate' => $patient['birthdate'], 'sex' => $patient['sex'],
             'address' => $patient['address'], 'contact_no' => $patient['contact_no'],
         ], array_intersect_key($in, array_flip(['birthdate', 'sex', 'address', 'contact_no'])));
-        $p = $this->profile_input($merged);
+        $p = $this->guard->patient_profile($merged);
 
         $this->User_model->update_basic($payload['sub'], $name, $patient['email']);
         $this->Patient_model->update_profile($patient['id'], $p['birthdate'], $p['sex'], $p['address'], $p['contact_no']);

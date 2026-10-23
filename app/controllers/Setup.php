@@ -38,8 +38,7 @@ class Setup extends Controller
         echo str_pad('TABLE', 22) . "ROWS\n" . str_repeat('-', 30) . "\n";
         foreach (['users', 'patients', 'doctors', 'schedules', 'appointments', 'queue_tickets',
                   'patient_records', 'email_logs', 'refresh_tokens', 'migrations'] as $t) {
-            $c = $this->db->raw("SELECT COUNT(*) AS c FROM `$t`")->fetch(PDO::FETCH_ASSOC);
-            echo str_pad($t, 22) . $c['c'] . "\n";
+            echo str_pad($t, 22) . $this->db->table($t)->count() . "\n";
         }
     }
 

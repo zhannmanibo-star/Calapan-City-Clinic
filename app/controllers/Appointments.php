@@ -109,6 +109,39 @@ class Appointments extends Controller
         $this->guard->ok(['message' => 'Appointment booked.', 'appointment' => $appt], 201);
     }
 
+    // PUT /api/appointments/{id}  (the patient, or staff/admin)   { reason }
+    // Only appointments that are still pending or confirmed can be edited.
+    public function update($id)
+    {
+        $this->guard->api()->require_method('PUT');
+        $payload = $this->guard->require_role(['patient', 'staff', 'admin']);
+        $appt = $this->load_or_404($id);
+        if (!$this->can_access($payload, $appt)) $this->guard->fail('Access denied', 403);
+        if (!in_array($appt['status'], ['pending', 'confirmed'], true)) $this->guard->fail('This appointment can no longer be edited.', 422);
+
+        $in     = $this->guard->body();
+        $reason = trim($in['reason'] ?? '');
+        if (mb_strlen($reason) > 1000) $this->guard->fail('Reason is too long (1000 characters max).', 422);
+
+        $this->Appointment_model->update_reason($appt['id'], $reason ?: null);
+        $this->guard->ok(['message' => 'Appointment updated.', 'appointment' => $this->out($this->Appointment_model->find($appt['id']))]);
+    }
+
+    // DELETE /api/appointments/{id}  (staff/admin)
+    // Safeguard: completed visits and appointments with a patient record are kept as history.
+    public function destroy($id)
+    {
+        $this->guard->api()->require_method('DELETE');
+        $this->guard->require_role(['staff', 'admin']);
+        $appt = $this->load_or_404($id);
+
+        if ($appt['status'] === 'completed' || $this->Appointment_model->has_record($appt['id'])) {
+            $this->guard->fail('Completed visits and appointments with a record are kept as history.', 409);
+        }
+        $this->Appointment_model->remove($appt['id']);
+        $this->guard->ok(['message' => 'Appointment deleted.']);
+    }
+
     // PATCH /api/appointments/{id}/status  (staff/admin)   { status: confirmed|cancelled }
     public function update_status($id)
     {

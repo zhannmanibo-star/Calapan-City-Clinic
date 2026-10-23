@@ -30,6 +30,15 @@ Every error looks like `{ "error": "message to show the user", "status": 422 }`.
 | PUT | /auth/profile | patient | `name?, birthdate?, sex?, address?, contact_no?` |
 | GET | /dashboard | any | - different numbers per role |
 
+## Patients (staff panel)
+| Method | URL | Who | Body / query |
+|---|---|---|---|
+| GET | /patients | staff, admin, doctor | `?search=` (by name) |
+| GET | /patients/{id} | staff, admin, doctor | - |
+| POST | /patients | staff, admin | `name, email, password, birthdate?, sex?, address?, contact_no?` (walk-in patient) |
+| PUT | /patients/{id} | staff, admin | `name?, email?, birthdate?, sex?, address?, contact_no?` |
+| DELETE | /patients/{id} | admin | refused (409) if the patient has appointments |
+
 ## Doctors and schedules
 | Method | URL | Who | Body / query |
 |---|---|---|---|
@@ -52,7 +61,9 @@ Schedule `status`: `open` (accepting), `full` (max_slots reached), `closed` (can
 | POST | /appointments | patient | `schedule_id, reason?` -> returns the appointment with `queue_number`, `qr_code`, `estimated_time` |
 | GET | /appointments | any | `?date=&status=&doctor_id=&schedule_id=` - patients see only their own, doctors only their patients |
 | GET | /appointments/{id} | owner, doctor, staff, admin | - |
+| PUT | /appointments/{id} | the patient, staff, admin | `reason` - only while pending or confirmed |
 | POST | /appointments/{id}/cancel | patient (own) | - |
+| DELETE | /appointments/{id} | staff, admin | refused (409) for completed visits or appointments with a record |
 | PATCH | /appointments/{id}/status | staff, admin | `status` = `confirmed` or `cancelled` |
 
 Appointment `status`: pending, confirmed, completed, cancelled, no_show.

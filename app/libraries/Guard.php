@@ -63,6 +63,52 @@ class Guard
         return $payload;
     }
 
+    /** A person's name from the request body (2 to 100 characters) */
+    public function name_field(array $in, $current = null, $key = 'name')
+    {
+        $name = trim($in[$key] ?? ($current ?? ''));
+        if (mb_strlen($name) < 2 || mb_strlen($name) > 100) $this->fail('Name must be 2 to 100 characters.', 422);
+        return $name;
+    }
+
+    /** A valid email address from the request body, in lowercase */
+    public function email_field(array $in, $current = null, $key = 'email')
+    {
+        $email = strtolower(trim($in[$key] ?? ($current ?? '')));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100) $this->fail('Please enter a valid email address.', 422);
+        return $email;
+    }
+
+    /** A password of at least 8 characters */
+    public function password_field(array $in, $key = 'password')
+    {
+        $password = (string) ($in[$key] ?? '');
+        if (mb_strlen($password) < 8) $this->fail('Password must be at least 8 characters.', 422);
+        return $password;
+    }
+
+    /** Optional contact number; returns null when empty */
+    public function phone_field(array $in, $current = null, $key = 'contact_no')
+    {
+        $phone = trim($in[$key] ?? ($current ?? ''));
+        if ($phone !== '' && !preg_match('/^[0-9+\-\s()]{7,20}$/', $phone)) $this->fail('Contact number is not valid.', 422);
+        return $phone ?: null;
+    }
+
+    /** The optional patient profile fields: birthdate, sex, address, contact_no */
+    public function patient_profile(array $in)
+    {
+        $birth = trim($in['birthdate'] ?? '');
+        $sex   = trim($in['sex'] ?? '');
+        $addr  = trim($in['address'] ?? '');
+
+        if ($birth !== '' && (!$this->valid_date($birth) || $birth > date('Y-m-d'))) $this->fail('Birthdate must look like 2000-05-17 and cannot be in the future.', 422);
+        if ($sex !== '' && !in_array($sex, ['Male', 'Female', 'Other'], true)) $this->fail('Sex must be Male, Female or Other.', 422);
+        if (mb_strlen($addr) > 255) $this->fail('Address is too long (255 characters max).', 422);
+
+        return ['birthdate' => $birth ?: null, 'sex' => $sex ?: null, 'address' => $addr ?: null, 'contact_no' => $this->phone_field($in)];
+    }
+
     /** Strict date check (YYYY-MM-DD) */
     public function valid_date($value)
     {

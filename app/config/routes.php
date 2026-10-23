@@ -76,6 +76,13 @@ $router->group(['prefix' => 'api'], function ($router) {
     $router->put('/users/{id}',     'Users::update');
     $router->delete('/users/{id}',  'Users::destroy');
 
+    // Patients (staff panel)
+    $router->get('/patients',         'Patients::index');
+    $router->post('/patients',        'Patients::store');
+    $router->get('/patients/{id}',    'Patients::show');
+    $router->put('/patients/{id}',    'Patients::update');
+    $router->delete('/patients/{id}', 'Patients::destroy');
+
     // Doctors
     $router->get('/doctors',         'Doctors::index');
     $router->post('/doctors',        'Doctors::store');
@@ -94,6 +101,8 @@ $router->group(['prefix' => 'api'], function ($router) {
     $router->get('/appointments',                 'Appointments::index');
     $router->post('/appointments',                'Appointments::store');
     $router->get('/appointments/{id}',            'Appointments::show');
+    $router->put('/appointments/{id}',            'Appointments::update');
+    $router->delete('/appointments/{id}',         'Appointments::destroy');
     $router->patch('/appointments/{id}/status',   'Appointments::update_status');
     $router->post('/appointments/{id}/cancel',    'Appointments::cancel');
 

@@ -7,78 +7,90 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 class Queue_model extends Model
 {
     protected $table = 'queue_tickets';
+    protected $primary_key = 'id';
+    protected $fillable = ['appointment_id', 'queue_number', 'qr_code', 'status', 'called_at'];
+    protected $guarded = ['id'];
 
-    private $select = "SELECT q.id AS ticket_id, q.appointment_id, q.queue_number, q.qr_code, q.status AS ticket_status, q.called_at,
-                              a.status AS appointment_status, a.patient_id, a.reason,
-                              s.id AS schedule_id, s.doctor_id, s.`date` AS appointment_date, s.start_time, s.end_time, s.max_slots,
-                              pu.name AS patient_name, du.name AS doctor_name, d.user_id AS doctor_user_id
-                       FROM queue_tickets q
-                       JOIN appointments a ON a.id = q.appointment_id
-                       JOIN patients p ON p.id = a.patient_id
-                       JOIN users pu ON pu.id = p.user_id
-                       JOIN schedules s ON s.id = a.schedule_id
-                       JOIN doctors d ON d.id = s.doctor_id
-                       JOIN users du ON du.id = d.user_id";
+    // Ticket + appointment + schedule + patient + doctor
+    private function base_query()
+    {
+        return $this->db->table('queue_tickets')
+            ->select('queue_tickets.id AS ticket_id, queue_tickets.appointment_id, queue_tickets.queue_number, queue_tickets.qr_code, queue_tickets.status AS ticket_status, queue_tickets.called_at, '
+                . 'appointments.status AS appointment_status, appointments.patient_id, appointments.reason, '
+                . 'schedules.id AS schedule_id, schedules.doctor_id, schedules.date AS appointment_date, schedules.start_time, schedules.end_time, schedules.max_slots, '
+                . 'patient_users.name AS patient_name, doctor_users.name AS doctor_name, doctors.user_id AS doctor_user_id')
+            ->inner_join('appointments', 'appointments.id = queue_tickets.appointment_id')
+            ->inner_join('patients', 'patients.id = appointments.patient_id')
+            ->inner_join('users patient_users', 'patient_users.id = patients.user_id')
+            ->inner_join('schedules', 'schedules.id = appointments.schedule_id')
+            ->inner_join('doctors', 'doctors.id = schedules.doctor_id')
+            ->inner_join('users doctor_users', 'doctor_users.id = doctors.user_id');
+    }
 
     public function find_ticket($id)
     {
-        return $this->db->raw($this->select . " WHERE q.id = ? LIMIT 1", [$id])->fetch(PDO::FETCH_ASSOC) ?: null;
+        return $this->base_query()->where('queue_tickets.id', $id)->row_array() ?: null;
     }
 
     public function find_by_qr($qr)
     {
-        return $this->db->raw($this->select . " WHERE q.qr_code = ? LIMIT 1", [$qr])->fetch(PDO::FETCH_ASSOC) ?: null;
+        return $this->base_query()->where('queue_tickets.qr_code', $qr)->row_array() ?: null;
     }
 
     /** Staff/doctor view of a queue. Filters: schedule_id, doctor_id, date */
     public function list_filtered(array $f)
     {
-        $sql = $this->select . " WHERE q.status <> 'cancelled'";
-        $args = [];
-        foreach (['schedule_id' => 'a.schedule_id', 'doctor_id' => 's.doctor_id', 'date' => 's.`date`'] as $key => $col) {
-            if (!empty($f[$key])) { $sql .= " AND $col = ?"; $args[] = $f[$key]; }
+        $query = $this->base_query()->where('queue_tickets.status', '<>', 'cancelled');
+        foreach (['schedule_id' => 'appointments.schedule_id', 'doctor_id' => 'schedules.doctor_id', 'date' => 'schedules.date'] as $key => $column) {
+            if (!empty($f[$key])) $query->where($column, $f[$key]);
         }
-        $sql .= " ORDER BY s.`date`, du.name, q.queue_number";
-        return $this->db->raw($sql, $args)->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $query->order_by('schedules.date')->result_array();
+
+        usort($rows, fn($a, $b) => [$a['appointment_date'], $a['doctor_name'], (int) $a['queue_number']]
+                               <=> [$b['appointment_date'], $b['doctor_name'], (int) $b['queue_number']]);
+        return $rows;
     }
 
     /** Move the ticket to a new status and keep the appointment status in step */
     public function set_ticket_status($ticket_id, $ticket_status, $appointment_status = null)
     {
-        $this->db->raw(
-            "UPDATE queue_tickets SET status = ?, called_at = IF(? = 'called', NOW(), called_at) WHERE id = ?",
-            [$ticket_status, $ticket_status, $ticket_id]
-        );
+        $fields = ['status' => $ticket_status];
+        if ($ticket_status === 'called') $fields['called_at'] = date('Y-m-d H:i:s');
+        $this->db->table('queue_tickets')->where('id', $ticket_id)->update($fields);
+
         if ($appointment_status) {
-            $this->db->raw(
-                "UPDATE appointments SET status = ? WHERE id = (SELECT appointment_id FROM queue_tickets WHERE id = ?)",
-                [$appointment_status, $ticket_id]
-            );
+            $ticket = $this->db->table('queue_tickets')->select('appointment_id')->where('id', $ticket_id)->row_array();
+            $this->db->table('appointments')->where('id', $ticket['appointment_id'])->update(['status' => $appointment_status]);
         }
     }
 
     /** Public board: queue numbers and statuses only, no patient names */
     public function public_board($date)
     {
-        return $this->db->raw(
-            "SELECT du.name AS doctor_name, s.id AS schedule_id, s.start_time, s.end_time,
-                    q.queue_number, q.status AS ticket_status
-             FROM queue_tickets q
-             JOIN appointments a ON a.id = q.appointment_id
-             JOIN schedules s ON s.id = a.schedule_id
-             JOIN doctors d ON d.id = s.doctor_id
-             JOIN users du ON du.id = d.user_id
-             WHERE s.`date` = ? AND q.status <> 'cancelled'
-             ORDER BY du.name, q.queue_number", [$date]
-        )->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->db->table('queue_tickets')
+            ->select('doctor_users.name AS doctor_name, schedules.id AS schedule_id, schedules.start_time, schedules.end_time, queue_tickets.queue_number, queue_tickets.status AS ticket_status')
+            ->inner_join('appointments', 'appointments.id = queue_tickets.appointment_id')
+            ->inner_join('schedules', 'schedules.id = appointments.schedule_id')
+            ->inner_join('doctors', 'doctors.id = schedules.doctor_id')
+            ->inner_join('users doctor_users', 'doctor_users.id = doctors.user_id')
+            ->where('schedules.date', $date)
+            ->where('queue_tickets.status', '<>', 'cancelled')
+            ->order_by('doctor_users.name')
+            ->result_array();
+
+        usort($rows, fn($a, $b) => [$a['doctor_name'], (int) $a['queue_number']] <=> [$b['doctor_name'], (int) $b['queue_number']]);
+        return $rows;
     }
 
     public function count_by_status($date, $status)
     {
-        $row = $this->db->raw(
-            "SELECT COUNT(*) AS c FROM queue_tickets q JOIN appointments a ON a.id = q.appointment_id
-             JOIN schedules s ON s.id = a.schedule_id WHERE s.`date` = ? AND q.status = ?", [$date, $status]
-        )->fetch(PDO::FETCH_ASSOC);
-        return (int) $row['c'];
+        $rows = $this->db->table('queue_tickets')
+            ->select('queue_tickets.id')
+            ->inner_join('appointments', 'appointments.id = queue_tickets.appointment_id')
+            ->inner_join('schedules', 'schedules.id = appointments.schedule_id')
+            ->where('schedules.date', $date)
+            ->where('queue_tickets.status', $status)
+            ->result_array();
+        return count($rows);
     }
 }

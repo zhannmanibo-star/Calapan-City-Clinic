@@ -28,14 +28,11 @@ class Users extends Controller
         $this->guard->require_role(['admin']);
 
         $in    = $this->guard->body();
-        $name  = trim($in['name'] ?? '');
-        $email = strtolower(trim($in['email'] ?? ''));
-        $pass  = (string) ($in['password'] ?? '');
+        $name  = $this->guard->name_field($in);
+        $email = $this->guard->email_field($in);
+        $pass  = $this->guard->password_field($in);
         $role  = (string) ($in['role'] ?? '');
 
-        if (mb_strlen($name) < 2 || mb_strlen($name) > 100) $this->guard->fail('Name must be 2 to 100 characters.', 422);
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100) $this->guard->fail('Please enter a valid email address.', 422);
-        if (mb_strlen($pass) < 8)                       $this->guard->fail('Password must be at least 8 characters.', 422);
         if (!in_array($role, ['staff', 'admin'], true)) $this->guard->fail('Role must be staff or admin.', 422);
         if ($this->User_model->find_by_email($email))   $this->guard->fail('That email is already registered.', 409);
 
@@ -53,10 +50,8 @@ class Users extends Controller
         if (!$user || !in_array($user['role'], ['staff', 'admin'], true)) $this->guard->fail('Staff or admin account not found.', 404);
 
         $in    = $this->guard->body();
-        $name  = trim($in['name'] ?? $user['name']);
-        $email = strtolower(trim($in['email'] ?? $user['email']));
-        if (mb_strlen($name) < 2 || mb_strlen($name) > 100) $this->guard->fail('Name must be 2 to 100 characters.', 422);
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100) $this->guard->fail('Please enter a valid email address.', 422);
+        $name  = $this->guard->name_field($in, $user['name']);
+        $email = $this->guard->email_field($in, $user['email']);
 
         $other = $this->User_model->find_by_email($email);
         if ($other && (int) $other['id'] !== (int) $user['id']) $this->guard->fail('That email is already registered.', 409);

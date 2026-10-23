@@ -15,17 +15,14 @@ class Doctors extends Controller
     // Reads and checks the fields shared by store() and update()
     private function read_fields(array $in, $current = null)
     {
-        $name  = trim($in['name'] ?? ($current['name'] ?? ''));
-        $email = strtolower(trim($in['email'] ?? ($current['email'] ?? '')));
+        $name  = $this->guard->name_field($in, $current['name'] ?? null);
+        $email = $this->guard->email_field($in, $current['email'] ?? null);
+        $phone = $this->guard->phone_field($in, $current['contact_no'] ?? null);
         $spec  = trim($in['specialization'] ?? ($current['specialization'] ?? ''));
-        $phone = trim($in['contact_no'] ?? ($current['contact_no'] ?? ''));
 
-        if (mb_strlen($name) < 2 || mb_strlen($name) > 100) $this->guard->fail('Name must be 2 to 100 characters.', 422);
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100) $this->guard->fail('Please enter a valid email address.', 422);
         if ($spec === '' || mb_strlen($spec) > 100) $this->guard->fail('Specialization is required (100 characters max).', 422);
-        if ($phone !== '' && !preg_match('/^[0-9+\-\s()]{7,20}$/', $phone)) $this->guard->fail('Contact number is not valid.', 422);
 
-        return [$name, $email, $spec, $phone ?: null];
+        return [$name, $email, $spec, $phone];
     }
 
     // GET /api/doctors
@@ -55,8 +52,7 @@ class Doctors extends Controller
 
         $in = $this->guard->body();
         [$name, $email, $spec, $phone] = $this->read_fields($in);
-        $pass = (string) ($in['password'] ?? '');
-        if (mb_strlen($pass) < 8) $this->guard->fail('Password must be at least 8 characters.', 422);
+        $pass = $this->guard->password_field($in);
         if ($this->User_model->find_by_email($email)) $this->guard->fail('That email is already registered.', 409);
 
         $id = $this->Doctor_model->create_with_user($name, $email, $pass, $spec, $phone);

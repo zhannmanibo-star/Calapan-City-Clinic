@@ -7,29 +7,35 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 class Doctor_model extends Model
 {
     protected $table = 'doctors';
+    protected $primary_key = 'id';
+    protected $fillable = ['user_id', 'specialization', 'contact_no'];
+    protected $guarded = ['id'];
 
-    private $select = "SELECT d.id, d.user_id, u.name, u.email, d.specialization, d.contact_no
-                       FROM doctors d JOIN users u ON u.id = d.user_id";
+    private function base_query()
+    {
+        return $this->db->table('doctors')
+            ->select('doctors.id, doctors.user_id, users.name, users.email, doctors.specialization, doctors.contact_no')
+            ->inner_join('users', 'users.id = doctors.user_id');
+    }
 
     public function all_doctors()
     {
-        return $this->db->raw($this->select . " ORDER BY u.name")->fetchAll(PDO::FETCH_ASSOC);
+        return $this->base_query()->order_by('users.name')->result_array();
     }
 
     public function find($id)
     {
-        return $this->db->raw($this->select . " WHERE d.id = ? LIMIT 1", [$id])->fetch(PDO::FETCH_ASSOC) ?: null;
+        return $this->base_query()->where('doctors.id', $id)->row_array() ?: null;
     }
 
     public function find_by_user($user_id)
     {
-        return $this->db->raw($this->select . " WHERE d.user_id = ? LIMIT 1", [$user_id])->fetch(PDO::FETCH_ASSOC) ?: null;
+        return $this->base_query()->where('doctors.user_id', $user_id)->row_array() ?: null;
     }
 
     public function count_all()
     {
-        $row = $this->db->raw("SELECT COUNT(*) AS c FROM doctors")->fetch(PDO::FETCH_ASSOC);
-        return (int) $row['c'];
+        return (int) $this->db->table('doctors')->count();
     }
 
     /** New doctor = one users row (role doctor) + one doctors row (saved together) */
@@ -37,16 +43,17 @@ class Doctor_model extends Model
     {
         $this->db->transaction();
         try {
-            $this->db->raw(
-                "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'doctor')",
-                [$name, $email, password_hash($password, PASSWORD_DEFAULT)]
-            );
+            $this->db->table('users')->insert([
+                'name' => $name, 'email' => $email,
+                'password' => password_hash($password, PASSWORD_DEFAULT), 'role' => 'doctor',
+            ]);
             $user_id = (int) $this->db->last_id();
-            $this->db->raw(
-                "INSERT INTO doctors (user_id, specialization, contact_no) VALUES (?, ?, ?)",
-                [$user_id, $specialization, $contact_no]
-            );
+
+            $this->db->table('doctors')->insert([
+                'user_id' => $user_id, 'specialization' => $specialization, 'contact_no' => $contact_no,
+            ]);
             $id = (int) $this->db->last_id();
+
             $this->db->commit();
             return $id;
         } catch (Throwable $e) {
@@ -58,31 +65,30 @@ class Doctor_model extends Model
     public function update_profile($id, $name, $email, $specialization, $contact_no)
     {
         $doctor = $this->find($id);
-        $this->db->raw("UPDATE users SET name = ?, email = ? WHERE id = ?", [$name, $email, $doctor['user_id']]);
-        $this->db->raw("UPDATE doctors SET specialization = ?, contact_no = ? WHERE id = ?", [$specialization, $contact_no, $id]);
+        $this->db->table('users')->where('id', $doctor['user_id'])->update(['name' => $name, 'email' => $email]);
+        $this->db->table('doctors')->where('id', $id)->update(['specialization' => $specialization, 'contact_no' => $contact_no]);
     }
 
     /** Has this doctor ever had appointments or written records? */
     public function has_history($id)
     {
-        $a = $this->db->raw(
-            "SELECT COUNT(*) AS c FROM appointments a JOIN schedules s ON s.id = a.schedule_id WHERE s.doctor_id = ?", [$id]
-        )->fetch(PDO::FETCH_ASSOC);
-        $r = $this->db->raw("SELECT COUNT(*) AS c FROM patient_records WHERE doctor_id = ?", [$id])->fetch(PDO::FETCH_ASSOC);
-        return ((int) $a['c'] + (int) $r['c']) > 0;
+        $schedule_ids = array_column($this->db->table('schedules')->select('id')->where('doctor_id', $id)->result_array(), 'id');
+        $appointments = $schedule_ids ? $this->db->table('appointments')->in('schedule_id', $schedule_ids)->count() : 0;
+        $records      = $this->db->table('patient_records')->where('doctor_id', $id)->count();
+        return ($appointments + $records) > 0;
     }
 
-    /** Delete a doctor with no history (also their empty schedules, email logs and login) */
+    /** Delete a doctor with no history (also their empty schedules, email log and login) */
     public function delete_completely($id)
     {
         $doctor = $this->find($id);
         $this->db->transaction();
         try {
-            $this->db->raw("DELETE FROM schedules WHERE doctor_id = ?", [$id]);
-            $this->db->raw("DELETE FROM doctors WHERE id = ?", [$id]);
-            $this->db->raw("DELETE FROM email_logs WHERE user_id = ?", [$doctor['user_id']]);
-            $this->db->raw("DELETE FROM refresh_tokens WHERE user_id = ?", [$doctor['user_id']]);
-            $this->db->raw("DELETE FROM users WHERE id = ?", [$doctor['user_id']]);
+            $this->db->table('schedules')->where('doctor_id', $id)->delete();
+            $this->db->table('doctors')->where('id', $id)->delete();
+            $this->db->table('email_logs')->where('user_id', $doctor['user_id'])->delete();
+            $this->db->table('refresh_tokens')->where('user_id', $doctor['user_id'])->delete();
+            $this->db->table('users')->where('id', $doctor['user_id'])->delete();
             $this->db->commit();
         } catch (Throwable $e) {
             $this->db->roll_back();

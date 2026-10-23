@@ -3,48 +3,54 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * users table (+ the patient / doctor profile ids that belong to a user).
+ * Uses the LavaLust Query Builder.
  */
 class User_model extends Model
 {
     protected $table = 'users';
+    protected $primary_key = 'id';
+    protected $fillable = ['google_id', 'name', 'email', 'password', 'role'];
+    protected $guarded = ['id'];
 
-    // Safe columns to send to the frontend (never the password)
-    private $public_select = "SELECT u.id, u.name, u.email, u.role, u.created_at,
-                                     p.id AS patient_id, d.id AS doctor_id
-                              FROM users u
-                              LEFT JOIN patients p ON p.user_id = u.id
-                              LEFT JOIN doctors d  ON d.user_id = u.id";
+    // Base query for sending a user to the frontend (never includes the password)
+    private function public_query()
+    {
+        return $this->db->table('users')
+            ->select('users.id, users.name, users.email, users.role, users.created_at, patients.id AS patient_id, doctors.id AS doctor_id')
+            ->left_join('patients', 'patients.user_id = users.id')
+            ->left_join('doctors', 'doctors.user_id = users.id');
+    }
 
     public function find_by_email($email)
     {
-        return $this->db->raw("SELECT * FROM users WHERE email = ? LIMIT 1", [$email])
-                        ->fetch(PDO::FETCH_ASSOC) ?: null;
+        return $this->db->table('users')->where('email', $email)->row_array() ?: null;
     }
 
     public function find_by_google_id($google_id)
     {
-        return $this->db->raw("SELECT * FROM users WHERE google_id = ? LIMIT 1", [$google_id])
-                        ->fetch(PDO::FETCH_ASSOC) ?: null;
+        return $this->db->table('users')->where('google_id', $google_id)->row_array() ?: null;
     }
 
     public function find_public($id)
     {
-        return $this->db->raw($this->public_select . " WHERE u.id = ? LIMIT 1", [$id])
-                        ->fetch(PDO::FETCH_ASSOC) ?: null;
+        return $this->public_query()->where('users.id', $id)->row_array() ?: null;
     }
 
     public function all_public()
     {
-        return $this->db->raw($this->public_select . " ORDER BY u.id")->fetchAll(PDO::FETCH_ASSOC);
+        return $this->public_query()->order_by('users.id')->result_array();
     }
 
-    /** Plain insert into users. $password may be null (Google-only accounts). */
+    /** Insert into users. $password may be null (Google-only accounts). */
     public function create($name, $email, $password, $role, $google_id = null)
     {
-        $this->db->raw(
-            "INSERT INTO users (google_id, name, email, password, role) VALUES (?, ?, ?, ?, ?)",
-            [$google_id, $name, $email, $password === null ? null : password_hash($password, PASSWORD_DEFAULT), $role]
-        );
+        $this->db->table('users')->insert([
+            'google_id' => $google_id,
+            'name'      => $name,
+            'email'     => $email,
+            'password'  => $password === null ? null : password_hash($password, PASSWORD_DEFAULT),
+            'role'      => $role,
+        ]);
         return (int) $this->db->last_id();
     }
 
@@ -54,10 +60,13 @@ class User_model extends Model
         $this->db->transaction();
         try {
             $id = $this->create($name, $email, $password, 'patient', $google_id);
-            $this->db->raw(
-                "INSERT INTO patients (user_id, birthdate, sex, address, contact_no) VALUES (?, ?, ?, ?, ?)",
-                [$id, $profile['birthdate'] ?? null, $profile['sex'] ?? null, $profile['address'] ?? null, $profile['contact_no'] ?? null]
-            );
+            $this->db->table('patients')->insert([
+                'user_id'    => $id,
+                'birthdate'  => $profile['birthdate'] ?? null,
+                'sex'        => $profile['sex'] ?? null,
+                'address'    => $profile['address'] ?? null,
+                'contact_no' => $profile['contact_no'] ?? null,
+            ]);
             $this->db->commit();
             return $id;
         } catch (Throwable $e) {
@@ -68,18 +77,18 @@ class User_model extends Model
 
     public function update_basic($id, $name, $email)
     {
-        $this->db->raw("UPDATE users SET name = ?, email = ? WHERE id = ?", [$name, $email, $id]);
+        $this->db->table('users')->where('id', $id)->update(['name' => $name, 'email' => $email]);
     }
 
     public function link_google($id, $google_id)
     {
-        $this->db->raw("UPDATE users SET google_id = ? WHERE id = ?", [$google_id, $id]);
+        $this->db->table('users')->where('id', $id)->update(['google_id' => $google_id]);
     }
 
-    /** Delete an account that has no other records attached */
+    /** Delete an account (and its login tokens) */
     public function remove($id)
     {
-        $this->db->raw("DELETE FROM refresh_tokens WHERE user_id = ?", [$id]);
-        $this->db->raw("DELETE FROM users WHERE id = ?", [$id]);
+        $this->db->table('refresh_tokens')->where('user_id', $id)->delete();
+        $this->db->table('users')->where('id', $id)->delete();
     }
 }
