@@ -45,4 +45,74 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /** @var object $router **/
 
 $router->get('/', 'Clinic::index');
-$router->get('/about', 'Clinic::about');
+
+// ---------------------------------------------------------------
+// One-time setup (works only when APP_ENV=development)
+// ---------------------------------------------------------------
+$router->get('/setup/migrate', 'Setup::migrate');
+$router->get('/setup/seed', 'Setup::seed');
+$router->get('/setup/status', 'Setup::status');
+
+// ---------------------------------------------------------------
+// REST API  (JSON)  -  all URLs start with /api
+// ---------------------------------------------------------------
+$router->group(['prefix' => 'api'], function ($router) {
+
+    // Authentication and profile
+    $router->post('/auth/register', 'Auth::register');
+    $router->post('/auth/login',    'Auth::login');
+    $router->post('/auth/google',   'Auth::google');
+    $router->post('/auth/refresh',  'Auth::refresh');
+    $router->post('/auth/logout',   'Auth::logout');
+    $router->get('/auth/me',        'Auth::me');
+    $router->put('/auth/profile',   'Auth::update_profile');
+
+    // Dashboard summary (per role)
+    $router->get('/dashboard', 'Dashboard::index');
+
+    // User accounts: staff / admin (admin only)
+    $router->get('/users',          'Users::index');
+    $router->post('/users',         'Users::store');
+    $router->put('/users/{id}',     'Users::update');
+    $router->delete('/users/{id}',  'Users::destroy');
+
+    // Doctors
+    $router->get('/doctors',         'Doctors::index');
+    $router->post('/doctors',        'Doctors::store');
+    $router->get('/doctors/{id}',    'Doctors::show');
+    $router->put('/doctors/{id}',    'Doctors::update');
+    $router->delete('/doctors/{id}', 'Doctors::destroy');
+
+    // Doctor schedules
+    $router->get('/schedules',          'Schedules::index');
+    $router->post('/schedules',         'Schedules::store');
+    $router->get('/schedules/{id}',     'Schedules::show');
+    $router->put('/schedules/{id}',     'Schedules::update');
+    $router->delete('/schedules/{id}',  'Schedules::destroy');
+
+    // Appointments (booking creates the queue number + QR code)
+    $router->get('/appointments',                 'Appointments::index');
+    $router->post('/appointments',                'Appointments::store');
+    $router->get('/appointments/{id}',            'Appointments::show');
+    $router->patch('/appointments/{id}/status',   'Appointments::update_status');
+    $router->post('/appointments/{id}/cancel',    'Appointments::cancel');
+
+    // Queue + QR check-in, public queue board
+    $router->get('/queue',                  'Queue::index');
+    $router->get('/queue/board',            'Queue::board');
+    $router->get('/queue/ticket/{qr}',      'Queue::ticket');
+    $router->post('/queue/check-in',        'Queue::check_in');
+    $router->post('/queue/call-next',       'Queue::call_next');
+    $router->patch('/queue/{id}/status',    'Queue::update_status');
+
+    // Patient records
+    $router->get('/records',          'Records::index');
+    $router->post('/records',         'Records::store');
+    $router->get('/records/{id}',     'Records::show');
+    $router->put('/records/{id}',     'Records::update');
+    $router->delete('/records/{id}',  'Records::destroy');
+
+    // Emails (log + "send email to doctors")
+    $router->get('/emails',          'Emails::index');
+    $router->post('/emails/doctors', 'Emails::send_to_doctors');
+});

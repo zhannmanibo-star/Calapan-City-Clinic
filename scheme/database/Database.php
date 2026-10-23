@@ -268,6 +268,19 @@ class Database {
             PDO::ATTR_EMULATE_PREPARES   => false,
         );
 
+        // Aiven requires an encrypted connection. If DB_SSL_CA is set in .env
+        // (e.g. DB_SSL_CA=ca.pem), use that certificate file to connect securely.
+        $ssl_ca = getenv('DB_SSL_CA');
+        if ($driver === 'mysql' && !empty($ssl_ca)) {
+            $options[PDO::MYSQL_ATTR_SSL_CA] = ROOT_DIR . $ssl_ca;
+        }
+
+        // Cloud databases (like Aiven) run on UTC. Use Philippine time so created_at,
+        // NOW() and CURDATE() match the clinic's local date and time.
+        if ($driver === 'mysql') {
+            $options[PDO::MYSQL_ATTR_INIT_COMMAND] = "SET time_zone = '+08:00'";
+        }
+
         try {
             $this->db = new PDO($dsn, $username, $password, $options);
             $this->driver = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
