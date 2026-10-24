@@ -24,3 +24,5 @@ runtime/*
 
 # OS
 Thumbs.db
+# Local Aiven certificate
+/ca.pem
