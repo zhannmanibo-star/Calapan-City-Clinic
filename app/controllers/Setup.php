@@ -42,6 +42,46 @@ class Setup extends Controller
         }
     }
 
+    // GET /setup/integrations   (add ?send_test_to=you@example.com to also send a test email)
+    // Checks the outside services with your real keys and tells you what is wrong.
+    public function integrations()
+    {
+        $this->call->library(['mailer', 'google_calendar', 'http_client']);
+        $yes = fn($v) => $v === null ? 'not checked' : ($v ? 'OK' : 'PROBLEM');
+
+        echo "INTEGRATIONS CHECK\n==================\n\n";
+
+        echo "1. Google login\n";
+        echo "   GOOGLE_CLIENT_ID: " . (getenv('GOOGLE_CLIENT_ID') ? 'set' : 'NOT SET') . "\n";
+        // Can this server reach Google over HTTPS? (a fake token must come back as HTTP 400, not a network error)
+        $ping = $this->http_client->request('GET', (getenv('GOOGLE_TOKENINFO_URL') ?: 'https://oauth2.googleapis.com/tokeninfo') . '?id_token=connection-test');
+        echo "   Can reach Google:  " . ($ping['code'] > 0 ? 'OK' : 'PROBLEM - ' . $ping['error']) . "\n";
+        echo "   (the real test is the Sign in with Google button on the frontend)\n\n";
+
+        $mail = $this->mailer->check();
+        echo "2. Email (Brevo)\n";
+        echo "   API key valid:   " . $yes($mail['key_valid']) . "\n";
+        echo "   Sender verified: " . $yes($mail['sender_verified']) . "\n";
+        if ($mail['error']) echo "   Problem: {$mail['error']}\n";
+        if (!empty($_GET['send_test_to'])) {
+            $ok = $this->mailer->deliver($_GET['send_test_to'], 'Calapan Clinic test email', "If you can read this, the email integration works.");
+            echo "   Test email to {$_GET['send_test_to']}: " . ($ok ? 'SENT' : 'FAILED - ' . $this->mailer->last_error) . "\n";
+        }
+        echo "\n";
+
+        $cal = $this->google_calendar->self_test();
+        echo "3. Google Calendar\n";
+        echo "   Configured:        " . ($cal['configured'] ? 'yes' : 'NO') . "\n";
+        echo "   Service account:   " . $yes($cal['configured'] ? $cal['token'] : null) . "\n";
+        echo "   Create test event: " . $yes($cal['configured'] ? $cal['event'] : null) . "\n";
+        echo "   Delete test event: " . $yes($cal['configured'] ? $cal['deleted'] : null) . "\n";
+        if ($cal['error']) echo "   Problem: {$cal['error']}\n";
+        echo "\n";
+
+        echo "4. QR code\n   Built in: every booking gets a unique qr_code (the frontend draws and scans it)\n\n";
+        echo "5. Google Maps\n   Frontend only (an embedded map with your Maps API key)\n";
+    }
+
     // GET /setup/seed
     public function seed()
     {

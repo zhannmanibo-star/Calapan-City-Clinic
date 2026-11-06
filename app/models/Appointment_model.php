@@ -130,6 +130,12 @@ class Appointment_model extends Model
         $this->sync_schedule($appointment['schedule_id']);
     }
 
+    /** Remember which Google Calendar event belongs to this appointment (null = none) */
+    public function set_event_id($id, $event_id)
+    {
+        $this->db->table('appointments')->where('id', $id)->update(['gcal_event_id' => $event_id]);
+    }
+
     public function update_reason($id, $reason)
     {
         $this->db->table('appointments')->where('id', $id)->update(['reason' => $reason]);

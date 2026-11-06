@@ -96,6 +96,12 @@ class Schedule_model extends Model
         $this->sync_status($id);
     }
 
+    /** Remember which Google Calendar event belongs to this schedule (null = none) */
+    public function set_event_id($id, $event_id)
+    {
+        $this->db->table('schedules')->where('id', $id)->update(['gcal_event_id' => $event_id]);
+    }
+
     public function has_appointments($id)
     {
         return $this->db->table('appointments')->where('schedule_id', $id)->count() > 0;

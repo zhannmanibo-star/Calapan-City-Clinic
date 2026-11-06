@@ -23,7 +23,7 @@ Every error looks like `{ "error": "message to show the user", "status": 422 }`.
 |---|---|---|---|
 | POST | /auth/register | Public | `name, email, password, birthdate?, sex?(Male/Female/Other), address?, contact_no?` |
 | POST | /auth/login | Public | `email, password` |
-| POST | /auth/google | Public | `credential` (Google ID token) - needs GOOGLE_CLIENT_ID on the server |
+| POST | /auth/google | Public | `credential` (the Google ID token from the Sign in with Google button). New Google users become patients. A Google email that matches an existing account (staff, doctor) logs into that account. Needs GOOGLE_CLIENT_ID on the server |
 | POST | /auth/refresh | Public | `refresh_token` |
 | POST | /auth/logout | Public | `refresh_token` |
 | GET | /auth/me | any | - returns `user` and `patient_profile` |
@@ -101,7 +101,17 @@ Appointment status follows automatically: served = completed, skipped = no_show.
 | PUT | /users/{id} | admin | `name?, email?` |
 | DELETE | /users/{id} | admin | not your own account |
 | POST | /emails/doctors | staff, admin | `subject, message, doctor_id?` (no doctor_id = all doctors) |
+| POST | /emails/reminders | staff, admin | `date?` (default tomorrow) - emails patients who still have an appointment that day; nobody is reminded twice |
+| POST | /calendar/sync | staff, admin | creates the Google Calendar events that are missing. 503 if Google Calendar is not set up |
 | GET | /emails | staff, admin | the email log |
 
 ## Demo accounts (created by /setup/seed, password = SEED_PASSWORD in `.env`)
 `admin@clinic.test`, `staff@clinic.test`, `doctor@clinic.test`, `patient@clinic.test`
+
+## Google Calendar fields
+Every schedule and appointment has a `gcal_event_id`. It is filled automatically when Google Calendar is set up
+(schedule -> "Clinic hours" event, appointment -> "Queue #N" event) and is `null` otherwise. The frontend can ignore it.
+
+## Email status
+Booking, cancellation, reminder and doctor emails are recorded in `GET /emails` with status `sent`, `queued`
+(no Brevo key on the server) or `failed`. A failed email never blocks a booking.

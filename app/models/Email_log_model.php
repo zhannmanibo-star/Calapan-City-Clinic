@@ -25,6 +25,16 @@ class Email_log_model extends Model
         return (int) $this->db->last_id();
     }
 
+    /** Has an email of this type already been sent (or queued) for this appointment? */
+    public function already_logged($appointment_id, $type)
+    {
+        return $this->db->table('email_logs')
+            ->where('appointment_id', $appointment_id)
+            ->where('type', $type)
+            ->where('status', '<>', 'failed')
+            ->count() > 0;
+    }
+
     public function recent($limit = 100)
     {
         return $this->db->table('email_logs')

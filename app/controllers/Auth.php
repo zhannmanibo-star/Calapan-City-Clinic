@@ -86,7 +86,11 @@ class Auth extends Controller
 
         $in  = $this->guard->body();
         $g   = $this->verify_google_token((string) ($in['credential'] ?? ''), $client_id);
-        if (!$g) $this->guard->fail('Google sign-in failed. Please try again.', 401);
+        if (!$g) {
+            // While developing, say WHY it failed (SSL certificate, wrong Client ID, ...). Never on the live site.
+            $why = getenv('APP_ENV') === 'development' && $this->google_error ? ' (' . $this->google_error . ')' : '';
+            $this->guard->fail('Google sign-in failed. Please try again.' . $why, 401);
+        }
 
         $user = $this->User_model->find_by_google_id($g['sub']);
         if (!$user) {
@@ -106,22 +110,25 @@ class Auth extends Controller
         ]);
     }
 
-    // Asks Google whether the ID token is real, and checks it was made for our app
+    // Asks Google whether the ID token is real, and checks it was made for our app.
+    // On failure it returns null and keeps the reason in $this->google_error.
+    private $google_error = null;
+
     private function verify_google_token($credential, $client_id)
     {
-        if ($credential === '' || !function_exists('curl_init')) return null;
-        $ch = curl_init('https://oauth2.googleapis.com/tokeninfo?id_token=' . urlencode($credential));
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
-        $raw  = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if ($code !== 200 || !$raw) return null;
+        if ($credential === '') { $this->google_error = 'No Google credential was sent.'; return null; }
+        $this->call->library('http_client');
 
-        $d = json_decode($raw, true);
-        if (!$d || ($d['aud'] ?? '') !== $client_id) return null;
-        if (!in_array($d['iss'] ?? '', ['accounts.google.com', 'https://accounts.google.com'], true)) return null;
-        if (($d['email_verified'] ?? '') !== 'true' && ($d['email_verified'] ?? false) !== true) return null;
-        if (empty($d['sub']) || empty($d['email'])) return null;
+        $url = (getenv('GOOGLE_TOKENINFO_URL') ?: 'https://oauth2.googleapis.com/tokeninfo') . '?id_token=' . urlencode($credential);
+        $res = $this->http_client->request('GET', $url);
+        $d   = $res['data'];
+        if ($res['code'] === 0) { $this->google_error = 'The server could not reach Google: ' . ($res['error'] ?: 'unknown network error'); return null; }
+        if ($res['code'] !== 200 || !is_array($d)) { $this->google_error = 'Google rejected the token (HTTP ' . $res['code'] . '). It may have expired; try again.'; return null; }
+
+        if (($d['aud'] ?? '') !== $client_id) { $this->google_error = 'The token was made for a different Client ID than GOOGLE_CLIENT_ID in the backend .env.'; return null; }
+        if (!in_array($d['iss'] ?? '', ['accounts.google.com', 'https://accounts.google.com'], true)) { $this->google_error = 'Unexpected token issuer.'; return null; }
+        if (($d['email_verified'] ?? '') !== 'true' && ($d['email_verified'] ?? false) !== true) { $this->google_error = 'The Google email is not verified.'; return null; }
+        if (empty($d['sub']) || empty($d['email'])) { $this->google_error = 'The token has no email.'; return null; }
 
         return ['sub' => substr($d['sub'], 0, 50), 'email' => strtolower($d['email']), 'name' => mb_substr($d['name'] ?? $d['email'], 0, 100)];
     }

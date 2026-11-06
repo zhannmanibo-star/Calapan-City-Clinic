@@ -24,3 +24,6 @@ runtime/*
 
 # OS
 Thumbs.db
+# Google service account key (secret) and Windows CA bundle
+google-key.json
+cacert.pem

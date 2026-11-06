@@ -52,6 +52,7 @@ $router->get('/', 'Clinic::index');
 $router->get('/setup/migrate', 'Setup::migrate');
 $router->get('/setup/seed', 'Setup::seed');
 $router->get('/setup/status', 'Setup::status');
+$router->get('/setup/integrations', 'Setup::integrations');
 
 // ---------------------------------------------------------------
 // REST API  (JSON)  -  all URLs start with /api
@@ -122,6 +123,11 @@ $router->group(['prefix' => 'api'], function ($router) {
     $router->delete('/records/{id}',  'Records::destroy');
 
     // Emails (log + "send email to doctors")
-    $router->get('/emails',          'Emails::index');
+    $router->get('/emails',            'Emails::index');
+    $router->post('/emails/reminders', 'Emails::reminders');
+
+    // Google Calendar: create the events that are missing
+    $router->post('/calendar/sync', 'Calendar::sync');
+
     $router->post('/emails/doctors', 'Emails::send_to_doctors');
 });

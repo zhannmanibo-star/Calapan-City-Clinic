@@ -5,58 +5,87 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
  * Mailer - sends email through the Brevo Email API and records every attempt
  * in the email_logs table. A failed email never breaks the request that asked for it.
  *
- * .env settings:  BREVO_API_KEY=...   MAIL_FROM=you@example.com   MAIL_FROM_NAME=Calapan City Clinic
+ * .env settings:  BREVO_API_KEY=...   MAIL_FROM=you@example.com (a sender verified in Brevo)   MAIL_FROM_NAME=Calapan City Clinic
  * Without BREVO_API_KEY the email is only logged with status "queued".
  */
 class Mailer
 {
-    private $_lava;
+    private $lava;
+    private $http;
+
+    public $last_error = null;
 
     public function __construct()
     {
-        $this->_lava = lava_instance();
-        $this->_lava->call->model('Email_log_model');
+        $this->lava = lava_instance();
+        $this->lava->call->model('Email_log_model');
+        $this->lava->call->library('http_client');
+        $this->http = $this->lava->http_client;
     }
 
-    /** Returns 'sent', 'failed' or 'queued' */
+    private function base_url()
+    {
+        return rtrim(getenv('BREVO_API_BASE') ?: 'https://api.brevo.com/v3', '/');
+    }
+
+    /** Send and log. Returns 'sent', 'failed' or 'queued' */
     public function send($user_id, $appointment_id, $type, $to_email, $subject, $text)
     {
         $status = 'queued';
-        $key  = getenv('BREVO_API_KEY');
-        $from = getenv('MAIL_FROM');
-
-        if ($key && $from) {
-            $status = $this->post_to_brevo($key, $from, getenv('MAIL_FROM_NAME') ?: 'Calapan City Clinic', $to_email, $subject, $text)
-                ? 'sent' : 'failed';
+        if (getenv('BREVO_API_KEY') && getenv('MAIL_FROM')) {
+            $status = $this->deliver($to_email, $subject, $text) ? 'sent' : 'failed';
         }
 
         try {
-            $this->_lava->Email_log_model->add($user_id, $appointment_id, $type, $subject, $status);
+            $this->lava->Email_log_model->add($user_id, $appointment_id, $type, $subject, $status);
         } catch (Throwable $e) {
             // logging problems must never stop the booking
         }
         return $status;
     }
 
-    private function post_to_brevo($key, $from, $from_name, $to, $subject, $text)
+    /** Send one email through Brevo without logging it. Returns true when Brevo accepted it. */
+    public function deliver($to_email, $subject, $text)
     {
-        if (!function_exists('curl_init')) return false;
-        $ch = curl_init('https://api.brevo.com/v3/smtp/email');
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_HTTPHEADER     => ['accept: application/json', 'content-type: application/json', 'api-key: ' . $key],
-            CURLOPT_POSTFIELDS     => json_encode([
-                'sender'      => ['email' => $from, 'name' => $from_name],
-                'to'          => [['email' => $to]],
-                'subject'     => $subject,
-                'textContent' => $text,
-            ]),
-        ]);
-        curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        return $code >= 200 && $code < 300;
+        $this->last_error = null;
+        $res = $this->http->request('POST', $this->base_url() . '/smtp/email', json_encode([
+            'sender'      => ['email' => getenv('MAIL_FROM'), 'name' => getenv('MAIL_FROM_NAME') ?: 'Calapan City Clinic'],
+            'to'          => [['email' => $to_email]],
+            'subject'     => $subject,
+            'textContent' => $text,
+        ]), ['accept: application/json', 'content-type: application/json', 'api-key: ' . getenv('BREVO_API_KEY')]);
+
+        if ($res['code'] >= 200 && $res['code'] < 300) return true;
+        $this->last_error = $res['error'] ?: 'Brevo said: ' . ($res['data']['message'] ?? 'HTTP ' . $res['code']);
+        return false;
+    }
+
+    /** For /setup/integrations: is the key valid, and is MAIL_FROM a verified sender? */
+    public function check()
+    {
+        $key  = getenv('BREVO_API_KEY');
+        $from = strtolower(trim((string) getenv('MAIL_FROM')));
+        $out  = ['configured' => (bool) ($key && $from), 'key_valid' => null, 'sender_verified' => null, 'error' => null];
+
+        if (!$key)  { $out['error'] = 'BREVO_API_KEY is not set in .env'; return $out; }
+        if (!$from) { $out['error'] = 'MAIL_FROM is not set in .env'; return $out; }
+
+        $headers = ['accept: application/json', 'api-key: ' . $key];
+        $account = $this->http->request('GET', $this->base_url() . '/account', null, $headers);
+        $out['key_valid'] = $account['code'] === 200;
+        if (!$out['key_valid']) {
+            $out['error'] = $account['error'] ?: 'Brevo said: ' . ($account['data']['message'] ?? 'HTTP ' . $account['code']);
+            return $out;
+        }
+
+        $senders = $this->http->request('GET', $this->base_url() . '/senders', null, $headers);
+        if ($senders['code'] === 200) {
+            $out['sender_verified'] = false;
+            foreach ($senders['data']['senders'] ?? [] as $s) {
+                if (strtolower($s['email'] ?? '') === $from && ($s['active'] ?? true)) $out['sender_verified'] = true;
+            }
+            if (!$out['sender_verified']) $out['error'] = "$from is not an active sender in Brevo. Add it under Senders and click the link Brevo emails you.";
+        }
+        return $out;
     }
 }

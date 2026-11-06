@@ -9,6 +9,7 @@ class Schedules extends Controller
     public function before_action()
     {
         $this->call->library('guard');
+        $this->call->library('calendar_sync');
         $this->call->model(['Doctor_model', 'Schedule_model']);
     }
 
@@ -57,6 +58,7 @@ class Schedules extends Controller
         if ($this->Schedule_model->overlaps($doc, $date, $start, $end)) $this->guard->fail('This doctor already has a schedule that overlaps those hours.', 409);
 
         $id = $this->Schedule_model->create($doc, $date, $start, $end, $max);
+        $this->calendar_sync->schedule_saved($id);
         $this->guard->ok(['message' => 'Schedule added.', 'schedule' => $this->Schedule_model->find($id)], 201);
     }
 
@@ -83,6 +85,7 @@ class Schedules extends Controller
         if ($this->Schedule_model->overlaps($s['doctor_id'], $s['date'], $start, $end, $s['id'])) $this->guard->fail('Those hours overlap another schedule.', 409);
 
         $this->Schedule_model->update_fields($s['id'], $start, $end, $max, $status);
+        $this->calendar_sync->schedule_saved($s['id']);
         $this->guard->ok(['message' => 'Schedule updated.', 'schedule' => $this->Schedule_model->find($s['id'])]);
     }
 
@@ -100,9 +103,11 @@ class Schedules extends Controller
 
         if ($this->Schedule_model->has_appointments($s['id'])) {
             $this->Schedule_model->update_fields($s['id'], $s['start_time'], $s['end_time'], $s['max_slots'], 'closed');
+            $this->calendar_sync->schedule_saved($s['id']);
             $this->guard->ok(['message' => 'Schedule closed (it has cancelled appointments on record).', 'deleted' => false]);
         }
 
+        $this->calendar_sync->schedule_removed($s);
         $this->Schedule_model->remove($s['id']);
         $this->guard->ok(['message' => 'Schedule deleted.', 'deleted' => true]);
     }

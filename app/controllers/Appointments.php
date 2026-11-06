@@ -14,7 +14,7 @@ class Appointments extends Controller
 
     public function before_action()
     {
-        $this->call->library(['guard', 'mailer']);
+        $this->call->library(['guard', 'mailer', 'calendar_sync']);
         $this->call->model(['Appointment_model', 'Schedule_model', 'Patient_model', 'Doctor_model']);
     }
 
@@ -100,6 +100,7 @@ class Appointments extends Controller
         $result  = $this->Appointment_model->book((int) $patient['id'], $sid, $reason ?: null);
         if (isset($result['error'])) $this->guard->fail($result['error'], $result['code']);
 
+        $this->calendar_sync->appointment_booked($result['id']);
         $appt = $this->out($this->Appointment_model->find($result['id']));
         $this->email_patient($appt, 'booking_confirmation', 'Your clinic appointment is booked',
             "Hello {$appt['patient_name']},\n\nYour appointment with {$appt['doctor_name']} is booked.\n"
@@ -138,6 +139,7 @@ class Appointments extends Controller
         if ($appt['status'] === 'completed' || $this->Appointment_model->has_record($appt['id'])) {
             $this->guard->fail('Completed visits and appointments with a record are kept as history.', 409);
         }
+        $this->calendar_sync->appointment_removed($appt);
         $this->Appointment_model->remove($appt['id']);
         $this->guard->ok(['message' => 'Appointment deleted.']);
     }
@@ -155,6 +157,7 @@ class Appointments extends Controller
         if (!in_array($status, $allowed, true)) $this->guard->fail("Cannot change from '{$appt['status']}' to '{$status}'.", 422);
 
         $this->Appointment_model->set_status($appt['id'], $status);
+        if ($status === 'cancelled') $this->calendar_sync->appointment_removed($appt);
         $updated = $this->out($this->Appointment_model->find($appt['id']));
         if ($status === 'cancelled') {
             $this->email_patient($updated, 'cancellation', 'Your clinic appointment was cancelled',
@@ -179,6 +182,7 @@ class Appointments extends Controller
         }
 
         $this->Appointment_model->set_status($appt['id'], 'cancelled');
+        $this->calendar_sync->appointment_removed($appt);
         $updated = $this->out($this->Appointment_model->find($appt['id']));
         $this->email_patient($updated, 'cancellation', 'You cancelled your clinic appointment',
             "Hello {$updated['patient_name']},\n\nYour appointment with {$updated['doctor_name']} on {$updated['appointment_date']} was cancelled.\n\n- Calapan City Health and Sanitation Department");
