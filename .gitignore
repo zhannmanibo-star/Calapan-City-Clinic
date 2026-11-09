@@ -24,6 +24,11 @@ runtime/*
 
 # OS
 Thumbs.db
+<<<<<<< HEAD
 # Google service account key (secret) and Windows CA bundle
 google-key.json
 cacert.pem
+=======
+# Local Aiven certificate
+/ca.pem
+>>>>>>> 5bf516b8168a537a3adad1c2ea89233c090f2ca7
